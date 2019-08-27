@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace BookShelf.Controllers
 {
+    [Authorize]
     public class AuthorsController : Controller
     {
         private readonly ApplicationDbContext _context;
@@ -27,15 +28,12 @@ namespace BookShelf.Controllers
         private Task<ApplicationUser> GetCurrentUserAsync() => _userManager.GetUserAsync(HttpContext.User);
 
         // GET: Authors
-        [Authorize]
         public async Task<IActionResult> Index()
         {
             var user = await GetCurrentUserAsync();
 
-            var applicationDbContext = _context.Authors.Where(a => a.UserId == user.Id);
+            var applicationDbContext = _context.Authors.Include(a => a.User).Where(a => a.UserId == user.Id);
             return View(await applicationDbContext.ToListAsync());
- 
-
         }
 
         // GET: Authors/Details/5
@@ -49,10 +47,19 @@ namespace BookShelf.Controllers
             var author = await _context.Authors
                 .Include(a => a.User)
                 .FirstOrDefaultAsync(m => m.AuthorId == id);
+
             if (author == null)
             {
                 return NotFound();
             }
+
+            var wasCreatedBy = await WasCreatedByUser(author);
+
+            if(!wasCreatedBy)
+            {
+                return NotFound();
+            }
+
 
             return View(author);
         }
@@ -68,16 +75,13 @@ namespace BookShelf.Controllers
         // more details see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create([Bind("Firstname,LastName,Penname,PreferredGenre,UserId")] Author author)
+        public async Task<IActionResult> Create([Bind("Id,Firstname,LastName,Penname,PreferredGenre")] Author author)
         {
-            var user = await GetCurrentUserAsync();
-            author.UserId = user.Id;
-            author.User = user;
-            ModelState.Remove("UserId");
-            ModelState.Remove("User");
 
             if (ModelState.IsValid)
             {
+                var user = await GetCurrentUserAsync();
+                author.UserId = user.Id;
                 _context.Add(author);
                 await _context.SaveChangesAsync();
                 return RedirectToAction(nameof(Index));
@@ -110,11 +114,6 @@ namespace BookShelf.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Edit(int id, [Bind("AuthorId,Firstname,LastName,Penname,PreferredGenre,UserId")] Author author)
         {
-            var user = await GetCurrentUserAsync();
-            author.UserId = user.Id;
-            author.User = user;
-            ModelState.Remove("UserId");
-            ModelState.Remove("User");
 
             if (id != author.AuthorId)
             {
@@ -178,6 +177,12 @@ namespace BookShelf.Controllers
         private bool AuthorExists(int id)
         {
             return _context.Authors.Any(e => e.AuthorId == id);
+        }
+
+        private async Task<bool> WasCreatedByUser(Author author)
+        {
+            var user = await GetCurrentUserAsync();
+            return author.UserId == user.Id;
         }
     }
 }
